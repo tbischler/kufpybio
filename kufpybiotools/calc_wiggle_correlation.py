@@ -30,42 +30,59 @@ import argparse
 from wiggle import WiggleParser
 import numpy as np
 from scipy import stats
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 
 def main():
     parser = argparse.ArgumentParser(description=__description__)
-    parser.add_argument("wiggle_file_1", type=argparse.FileType("r"))
-    parser.add_argument("wiggle_file_2", type=argparse.FileType("r"))
+    parser.add_argument("--wiggle_file_1a", type=argparse.FileType("r"), required=True)
+    parser.add_argument("--wiggle_file_1b", type=argparse.FileType("r"), required=True)
+    parser.add_argument("--wiggle_file_2a", type=argparse.FileType("r"), required=True)
+    parser.add_argument("--wiggle_file_2b", type=argparse.FileType("r"), required=True)
+    parser.add_argument('-m', '--method', choices=('pearson', 'spearman'), default="pearson")
+    parser.add_argument('-r', '--rep_sizes', required=True)
     args = parser.parse_args()
-    wiggel_correlator = WiggleCorrelator()
-    wiggel_correlator.correlate(args.wiggle_file_1, args.wiggle_file_2)
+    wiggle_correlator = WiggleCorrelator(args)
+    wiggle_correlator.correlate(args.wiggle_file_1a, args.wiggle_file_2a, args.wiggle_file_1b, args.wiggle_file_2b)
 
 class WiggleCorrelator(object):
 
-    def __init__(self):
+    def __init__(self, args):
         self._wiggle_parser = WiggleParser()
+        self._method = args.method
+        self._rep_dict = dict([rep.split(':') for rep in args.rep_sizes.strip().split(',')])
 
-    def correlate(self, wiggle_file_1, wiggle_file_2):
-        self._chrom_and_pos_value_pairs = {}
-        print("Replicon: Pearson correlation coefficient (p-value)")
-        for entry_1, entry_2 in zip(
-                self._wiggle_parser.entries(wiggle_file_1),
-                self._wiggle_parser.entries(wiggle_file_2)):
-                assert(entry_1.replicon == entry_2.replicon)
-                pos_value_pairs_1 = dict(entry_1.pos_value_pairs)
-                pos_value_pairs_2 = dict(entry_2.pos_value_pairs)
-                if len(pos_value_pairs_1) == 0 or len(pos_value_pairs_2) == 0:
+    def correlate(self, wiggle_file_1a, wiggle_file_2a, wiggle_file_1b = None, wiggle_file_2b = None ):
+
+        print("Replicon: %s correlation coefficient (p-value)" % self._method)
+        for entry_1a, entry_2a, entry_1b, entry_2b in zip(
+                self._wiggle_parser.entries(wiggle_file_1a),
+                self._wiggle_parser.entries(wiggle_file_2a),
+                self._wiggle_parser.entries(wiggle_file_1b),
+                self._wiggle_parser.entries(wiggle_file_2b)):
+                assert(entry_1a.chrom_name == entry_2a.chrom_name == entry_1b.chrom_name == entry_2b.chrom_name)
+                pos_value_pairs_1a = dict(entry_1a.pos_value_pairs)
+                pos_value_pairs_2a = dict(entry_2a.pos_value_pairs)
+                pos_value_pairs_1b = dict(entry_1b.pos_value_pairs)
+                pos_value_pairs_2b = dict(entry_2b.pos_value_pairs)
+                if (len(pos_value_pairs_1a) == 0 and len(pos_value_pairs_1b) == 0) or (
+                    len(pos_value_pairs_2a) == 0 and len(pos_value_pairs_2b) == 0):
                     print("%s: At least one replicon has no coverage for "
-                          "this libs." % (entry_2.replicon))
+                          "this libs." % (entry_1a.chrom_name))
                     continue
-                non_redu_pos = set(
-                    pos_value_pairs_1.keys() + pos_value_pairs_2.keys())
+
                 values_1 = np.array(
-                    [pos_value_pairs_1.get(pos, 0.0) for pos in non_redu_pos])
+                    [pos_value_pairs_1a.get(pos, 0.0) for pos in range(1, int(self._rep_dict[entry_1a.chrom_name])+1)] +
+                    [pos_value_pairs_1b.get(pos, 0.0) for pos in range(1, int(self._rep_dict[entry_1b.chrom_name])+1)])
                 values_2 = np.array(
-                    [pos_value_pairs_2.get(pos, 0.0) for pos in non_redu_pos])
-                pearson, pvalue = stats.pearsonr(values_1, values_2)
-                print("%s: %s (%s)" % (entry_1.replicon, pearson, pvalue))
+                    [pos_value_pairs_2a.get(pos, 0.0) for pos in range(1, int(self._rep_dict[entry_2a.chrom_name])+1)] +
+                    [pos_value_pairs_2b.get(pos, 0.0) for pos in range(1, int(self._rep_dict[entry_2b.chrom_name])+1)])
+
+                if self._method == "pearson":
+                    corr, pvalue = stats.pearsonr(values_1, values_2)
+                else:
+                    corr, pvalue = stats.spearmanr(values_1, values_2)
+
+                print("%s: %s (%s)" % (entry_1a.chrom_name, corr, pvalue))
 
 if __name__ == "__main__":
    main()
